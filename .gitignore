@@ -1,9 +1,41 @@
-# Ignore everything by default so legacy files are not tracked.
-*
-!.gitignore
-!README.md
-!Dockerfile
-!.dockerignore
-!.github/
-!.github/workflows/
-!.github/workflows/docker-build.yml
+# Environment
+.env
+.env.*
+
+# Secrets and keys
+*.pem
+*.key
+*.p12
+*.pfx
+*secret*
+*secrets*
+
+# Databases and backups
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.dump
+*.sql
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+build/
+coverage/

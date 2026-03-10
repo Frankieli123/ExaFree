@@ -1,0 +1,30 @@
+services:
+  exa-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-http://deb.debian.org}
+    image: exafree:latest
+    container_name: exafree
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # 日志限制
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
