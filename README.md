@@ -29,21 +29,11 @@
 
 ---
 
-## 快速开始（Docker 推荐）
+## Docker部署（推荐）
 
 ```bash
-git clone https://github.com/Dreamy-rain/exafree.git
-cd exafree
-cp .env.example .env
-
-# 启动并构建
-docker compose up -d --build
-
-# 查看状态
-docker compose ps
-
-# 查看日志
-docker compose logs -f
+docker pull ghcr.io/chengtx809/exafree:main
+docker run --rm -p 7860:7860 -v ./data:/app/data ghcr.io/chengtx809/exafree:main
 ```
 
 访问：
@@ -57,24 +47,6 @@ docker compose logs -f
 - 密码：`123456`
 
 建议首次登录后立即修改密码。
-
----
-
-## 使用 GitHub Actions 构建的镜像
-
-仓库的 GitHub Actions 会将镜像推送到 GHCR。
-
-```bash
-docker pull ghcr.io/chengtx809/exafree:main
-docker run --rm -p 7860:7860 -v ./data:/app/data ghcr.io/chengtx809/exafree:main
-```
-
-说明：
-
-- 镜像标签包含分支名（例如 `main`）和 `sha` 标签。
-- 如果仓库为私有，需要先执行 `docker login ghcr.io`。
-
----
 
 ## 鉴权模型（重要）
 
