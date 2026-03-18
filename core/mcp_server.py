@@ -1,9 +1,12 @@
 import json
 import logging
+import os
 from typing import Optional, List, Dict, Any, Callable
+from urllib.parse import urlparse
 
 import httpx
 from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.transport_security import TransportSecuritySettings
 
 try:
     from mcp.server.dependencies import get_http_headers as _get_http_headers  # type: ignore
@@ -12,8 +15,116 @@ except Exception:  # pragma: no cover - optional dependency path
 
 logger = logging.getLogger(__name__)
 
+
+def _dedupe(values: List[str]) -> List[str]:
+    seen: set[str] = set()
+    result: List[str] = []
+    for value in values:
+        value = (value or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _parse_public_origin(value: str) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    if not parsed.scheme or not parsed.netloc:
+        return None
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _host_patterns_from_value(value: str) -> List[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return []
+
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    candidate = (parsed.netloc or parsed.path).strip()
+    if not candidate:
+        return []
+
+    if candidate.startswith("[") and "]" in candidate:
+        base_host = candidate.split("]", 1)[0] + "]"
+    else:
+        base_host = candidate.split(":", 1)[0]
+
+    return [candidate, base_host, f"{base_host}:*"]
+
+
+def _collect_configured_origins(raw_values: List[str]) -> List[str]:
+    origins: List[str] = []
+    for value in raw_values:
+        origin = _parse_public_origin(value)
+        if origin:
+            origins.append(origin)
+    return _dedupe(origins)
+
+
+def _build_transport_security() -> TransportSecuritySettings:
+    default_hosts = [
+        "127.0.0.1",
+        "127.0.0.1:*",
+        "localhost",
+        "localhost:*",
+        "[::1]",
+        "[::1]:*",
+    ]
+    default_origins = [
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "http://localhost",
+        "http://localhost:*",
+        "http://[::1]",
+        "http://[::1]:*",
+    ]
+
+    raw_origin_values = [
+        os.getenv("MCP_PUBLIC_BASE_URL", ""),
+        os.getenv("FRONTEND_ORIGIN", ""),
+        os.getenv("BASE_URL", ""),
+    ]
+    raw_origin_values.extend(os.getenv("MCP_ALLOWED_ORIGINS", "").split(","))
+    configured_origins = _collect_configured_origins(raw_origin_values)
+
+    raw_host_values = [
+        os.getenv("MCP_PUBLIC_BASE_URL", ""),
+        os.getenv("FRONTEND_ORIGIN", ""),
+        os.getenv("BASE_URL", ""),
+    ]
+    raw_host_values.extend(configured_origins)
+    raw_host_values.extend(os.getenv("MCP_ALLOWED_HOSTS", "").split(","))
+
+    configured_hosts: List[str] = []
+    for value in raw_host_values:
+        configured_hosts.extend(_host_patterns_from_value(value))
+
+    settings = TransportSecuritySettings(
+        enable_dns_rebinding_protection=os.getenv("MCP_ENABLE_DNS_REBINDING_PROTECTION", "1") != "0",
+        allowed_hosts=_dedupe(default_hosts + configured_hosts),
+        allowed_origins=_dedupe(default_origins + configured_origins),
+    )
+    logger.info(
+        "MCP transport security enabled=%s hosts=%s origins=%s",
+        settings.enable_dns_rebinding_protection,
+        settings.allowed_hosts,
+        settings.allowed_origins,
+    )
+    return settings
+
+
 # Initialize MCP server
-mcp = FastMCP("exa-pool", streamable_http_path="/")
+mcp = FastMCP(
+    "exa-pool",
+    streamable_http_path="/",
+    transport_security=_build_transport_security(),
+)
 
 # HTTP client timeout settings
 TIMEOUT = httpx.Timeout(30.0, connect=5.0)
