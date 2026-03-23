@@ -1,17 +1,77 @@
 name: Docker Build
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - "**"
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  build:
+  smoke-test:
     runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: exafree
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build smoke-test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: exafree-smoke:latest
+
+      - name: Smoke-test container
+        run: |
+          set -euo pipefail
+          docker run -d --name exafree-smoke -p 7860:7860 exafree-smoke:latest
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7860/health > /dev/null; then
+              curl -fsS http://127.0.0.1:7860/health
+              curl -fsS http://127.0.0.1:7860/ > /dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Smoke-test container did not become healthy in time"
+          exit 1
+
+      - name: Collect smoke-test diagnostics
+        if: failure()
+        run: |
+          mkdir -p smoke-diagnostics
+          docker ps -a > smoke-diagnostics/docker-ps.txt
+          docker inspect exafree-smoke > smoke-diagnostics/docker-inspect.json || true
+          docker logs exafree-smoke > smoke-diagnostics/docker-logs.txt 2>&1 || true
+
+      - name: Upload smoke-test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-diagnostics-${{ github.run_id }}
+          path: smoke-diagnostics
+
+      - name: Cleanup smoke-test container
+        if: always()
+        run: docker rm -f exafree-smoke || true
+
+  publish:
+    if: github.event_name == 'push'
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       IMAGE_NAME: exafree
     steps:
@@ -39,27 +99,6 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha
-
-      - name: Build smoke-test image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          platforms: linux/amd64
-          tags: exafree-smoke:latest
-
-      - name: Smoke-test container
-        run: |
-          docker run -d --rm --name exafree-smoke -p 7860:7860 exafree-smoke:latest
-          trap 'docker logs exafree-smoke || true; docker stop exafree-smoke || true' EXIT
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:7860/health > /dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          curl -fsS http://127.0.0.1:7860/health
-          curl -fsS http://127.0.0.1:7860/ > /dev/null
 
       - name: Build and push image
         uses: docker/build-push-action@v6
