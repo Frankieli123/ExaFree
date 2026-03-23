@@ -2136,6 +2136,7 @@ async def admin_get_settings(request: Request):
             "gptmail_domain": config.basic.gptmail_domain,
             "cfmail_base_url": config.basic.cfmail_base_url,
             "cfmail_api_key": config.basic.cfmail_api_key,
+            "cfmail_admin_password": getattr(config.basic, "cfmail_admin_password", "") or "",
             "cfmail_verify_ssl": config.basic.cfmail_verify_ssl,
             "cfmail_domain": config.basic.cfmail_domain,
             "refresh_window_hours": 0,
@@ -2213,6 +2214,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("gptmail_domain", config.basic.gptmail_domain)
         basic.setdefault("cfmail_base_url", config.basic.cfmail_base_url)
         basic.setdefault("cfmail_api_key", config.basic.cfmail_api_key)
+        basic.setdefault("cfmail_admin_password", getattr(config.basic, "cfmail_admin_password", "") or "")
         basic.setdefault("cfmail_verify_ssl", config.basic.cfmail_verify_ssl)
         basic.setdefault("cfmail_domain", config.basic.cfmail_domain)
         basic.setdefault("linuxdo_oauth_enabled", bool(getattr(config.basic, "linuxdo_oauth_enabled", False)))

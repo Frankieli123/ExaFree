@@ -6,6 +6,7 @@ API文档参考:
 - 生成临时邮箱: POST /api/emails/generate
 - 获取邮件列表: GET /api/emails/{emailId}
 - 获取单封邮件: GET /api/emails/{emailId}/{messageId}
+- 删除邮箱:     DELETE /api/emails/{emailId}
 """
 
 import random
@@ -257,6 +258,9 @@ class MoemailClient:
                 messages_with_time.sort(key=lambda item: item[1] or datetime.min, reverse=True)
                 messages = [item[0] for item in messages_with_time]
 
+            # 按验证码相关性排序：subject 匹配验证关键词的排前面
+            messages = sorted(messages, key=lambda m: (0 if _looks_like_verification(m) else 1))
+
             # 遍历邮件
             for idx, msg in enumerate(messages, 1):
                 msg_id = msg.get("id")
@@ -266,11 +270,7 @@ class MoemailClient:
                 # 时间过滤
                 if since_time:
                     msg_time = _parse_message_time(msg)
-                    if msg_time:
-                        if msg_time < since_time:
-                            continue
-
-                    if not _looks_like_verification(msg):
+                    if msg_time and msg_time < since_time:
                         continue
 
                 # 优先从邮件列表的 content 字段提取验证码（更高效）
@@ -322,6 +322,35 @@ class MoemailClient:
         except Exception as e:
             self._log("error", f"❌ 获取验证码异常: {e}")
             return None
+
+    def delete_email(self) -> bool:
+        """删除邮箱
+
+        API: DELETE /api/emails/{emailId}
+        """
+        if not self.email_id:
+            self._log("error", "❌ 缺少 email_id，无法删除邮箱")
+            return False
+
+        try:
+            self._log("info", f"🗑️ 正在删除邮箱: {self.email}")
+            res = self._request(
+                "DELETE",
+                f"{self.base_url}/api/emails/{self.email_id}",
+            )
+
+            if res.status_code in (200, 204):
+                self._log("info", f"✅ 邮箱已删除: {self.email}")
+                self.email = None
+                self.email_id = None
+                return True
+
+            self._log("error", f"❌ 删除邮箱失败: HTTP {res.status_code}")
+            return False
+
+        except Exception as e:
+            self._log("error", f"❌ 删除邮箱异常: {e}")
+            return False
 
     def poll_for_code(
         self,

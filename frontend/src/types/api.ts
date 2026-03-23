@@ -98,6 +98,7 @@ export interface Settings {
     gptmail_domain?: string
     cfmail_base_url?: string
     cfmail_api_key?: string
+    cfmail_admin_password?: string
     cfmail_verify_ssl?: boolean
     cfmail_domain?: string
     refresh_window_hours?: number

@@ -309,6 +309,13 @@
                     class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                     placeholder="留空则不使用密码"
                   />
+                  <label class="block text-xs text-muted-foreground">管理密码（x-admin-auth，无密码留空）</label>
+                  <input
+                    v-model="localSettings.basic.cfmail_admin_password"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="留空则不使用管理密码"
+                  />
                   <label class="block text-xs text-muted-foreground">邮箱域名（可选，不带@）</label>
                   <input
                     v-model="localSettings.basic.cfmail_domain"
@@ -541,6 +548,9 @@ watch(settings, (value) => {
     : ''
   next.basic.cfmail_api_key = typeof next.basic.cfmail_api_key === 'string'
     ? next.basic.cfmail_api_key
+    : ''
+  next.basic.cfmail_admin_password = typeof next.basic.cfmail_admin_password === 'string'
+    ? next.basic.cfmail_admin_password
     : ''
   next.basic.cfmail_verify_ssl = next.basic.cfmail_verify_ssl ?? true
   next.basic.cfmail_domain = typeof next.basic.cfmail_domain === 'string'

@@ -77,6 +77,7 @@ def create_temp_mail_client(
             base_url=effective_base_url,
             proxy=proxy,
             api_key=api_key or config.basic.cfmail_api_key,
+            admin_password=getattr(config.basic, "cfmail_admin_password", "") or "",
             domain=domain or config.basic.cfmail_domain,
             verify_ssl=verify_ssl if verify_ssl is not None else config.basic.cfmail_verify_ssl,
             log_callback=log_cb,

@@ -31,10 +31,12 @@ class CloudflareMailClient:
         domain: str = "",
         verify_ssl: bool = True,
         log_callback=None,
+        admin_password: str = "",
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.proxy_url = (proxy or "").strip()
-        self.api_key = (api_key or "").strip()   # x-custom-auth 密码
+        self.api_key = (api_key or "").strip()   # x-custom-auth 站点访问密码
+        self.admin_password = (admin_password or "").strip()  # x-admin-auth 管理密码
         self.domain = (domain or "").strip()
         self.verify_ssl = verify_ssl
         self.log_callback = log_callback
@@ -59,9 +61,13 @@ class CloudflareMailClient:
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         headers = kwargs.pop("headers", None) or {}
 
-        # 实例密码认证（admin 路由使用 x-admin-auth）
-        if self.api_key and "x-admin-auth" not in {k.lower() for k in headers}:
-            headers["x-admin-auth"] = self.api_key
+        # 站点访问密码 (x-custom-auth)
+        if self.api_key and "x-custom-auth" not in {k.lower() for k in headers}:
+            headers["x-custom-auth"] = self.api_key
+
+        # 管理密码 (x-admin-auth)
+        if self.admin_password and "x-admin-auth" not in {k.lower() for k in headers}:
+            headers["x-admin-auth"] = self.admin_password
 
         # 邮件操作时使用 JWT Bearer 认证
         if self.jwt_token and "authorization" not in {k.lower() for k in headers}:
