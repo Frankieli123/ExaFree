@@ -762,7 +762,7 @@ class ExaAutomation:
     def _ensure_proxy_bridge(self) -> None:
         if not self.needs_proxy_bridge or self.proxy_bridge is not None:
             return
-        self.proxy_bridge = PlaywrightSocksBridge(self.proxy_source).start()
+        self.proxy_bridge = PlaywrightSocksBridge(self.proxy_source, log_callback=self._log).start()
         self.playwright_proxy = {"server": self.proxy_bridge.local_url}
         bypass = format_no_proxy(self.no_proxy)
         if bypass != "none":

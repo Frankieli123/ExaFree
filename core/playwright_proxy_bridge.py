@@ -54,15 +54,13 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 headers.append(line)
 
             if method.upper() == "CONNECT":
-                logger.info("[PROXY] bridge CONNECT target=%s via=%s", target, sanitize_proxy_url(bridge.proxy_url))
+                bridge._log("info", f"[PROXY] bridge CONNECT target={target} via={sanitize_proxy_url(bridge.proxy_url)}")
                 bridge.handle_connect(self.connection, target)
                 return
 
-            logger.info(
-                "[PROXY] bridge %s target=%s via=%s",
-                method.upper(),
-                target,
-                sanitize_proxy_url(bridge.proxy_url),
+            bridge._log(
+                "info",
+                f"[PROXY] bridge {method.upper()} target={target} via={sanitize_proxy_url(bridge.proxy_url)}",
             )
             bridge.handle_http_request(
                 client_sock=self.connection,
@@ -81,11 +79,11 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 )
             except Exception:
                 pass
-            logger.warning("[PROXY] bridge request failed via=%s err=%s", sanitize_proxy_url(bridge.proxy_url), exc)
+            bridge._log("warning", f"[PROXY] bridge request failed via={sanitize_proxy_url(bridge.proxy_url)} err={exc}")
 
 
 class PlaywrightSocksBridge:
-    def __init__(self, proxy_url: str) -> None:
+    def __init__(self, proxy_url: str, log_callback=None) -> None:
         self.proxy_url = normalize_proxy_url(proxy_url)
         self.parsed = urlparse(self.proxy_url)
         self.scheme = (self.parsed.scheme or "").lower()
@@ -94,9 +92,21 @@ class PlaywrightSocksBridge:
         self.username = unquote(self.parsed.username) if self.parsed.username is not None else None
         self.password = unquote(self.parsed.password) if self.parsed.password is not None else None
         self.rdns = self.scheme == "socks5h"
+        self.log_callback = log_callback
         self._server: Optional[_ThreadingTCPServer] = None
         self._thread: Optional[threading.Thread] = None
         self.local_url = ""
+
+    def _log(self, level: str, message: str) -> None:
+        if level == "warning":
+            logger.warning(message)
+        else:
+            logger.info(message)
+        if self.log_callback:
+            try:
+                self.log_callback(level, message)
+            except Exception:
+                pass
 
     def start(self) -> "PlaywrightSocksBridge":
         if self.local_url:
@@ -109,10 +119,9 @@ class PlaywrightSocksBridge:
         self._server = server
         self._thread = thread
         self.local_url = f"http://127.0.0.1:{server.server_address[1]}"
-        logger.info(
-            "[PROXY] started playwright socks bridge upstream=%s local=%s",
-            sanitize_proxy_url(self.proxy_url),
-            self.local_url,
+        self._log(
+            "info",
+            f"[PROXY] started browser proxy bridge upstream={sanitize_proxy_url(self.proxy_url)} local={self.local_url}",
         )
         return self
 
@@ -187,11 +196,9 @@ class PlaywrightSocksBridge:
         sock.sendall(req)
         resp = self._recv_proxy_response_headers(sock)
         line = resp.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
-        logger.info(
-            "[PROXY] upstream CONNECT %s via=%s -> %s",
-            target,
-            sanitize_proxy_url(self.proxy_url),
-            line,
+        self._log(
+            "info",
+            f"[PROXY] upstream CONNECT {target} via={sanitize_proxy_url(self.proxy_url)} -> {line}",
         )
         if " 200 " not in f" {line} " and not line.startswith("HTTP/1.1 200") and not line.startswith("HTTP/1.0 200"):
             try:
