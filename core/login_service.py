@@ -183,9 +183,10 @@ class LoginService(BaseTaskService[LoginTask]):
             if provider == "moemail":
                 client.email_id = mail_password
 
-        proxy_for_auth, _ = parse_proxy_setting(config.basic.proxy_for_auth)
+        proxy_for_auth, no_proxy_for_auth = parse_proxy_setting(config.basic.proxy_for_auth)
         automation = ExaAutomation(
             proxy=proxy_for_auth,
+            no_proxy=no_proxy_for_auth,
             log_callback=log_cb,
         )
         if proxy_for_auth and automation.proxy != proxy_for_auth:

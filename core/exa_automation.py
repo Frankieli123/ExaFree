@@ -22,7 +22,12 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from core.config import config
-from core.proxy_utils import normalize_runtime_proxy_url, sanitize_proxy_url
+from core.proxy_utils import (
+    normalize_runtime_proxy_url,
+    sanitize_proxy_url,
+    format_no_proxy,
+    build_playwright_proxy_settings,
+)
 
 try:
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -55,11 +60,14 @@ class ExaAutomation:
     def __init__(
         self,
         proxy: str = "",
+        no_proxy: str = "",
         timeout_ms: int = 90_000,
         log_callback=None,
         headless: Optional[bool] = None,
     ) -> None:
         self.proxy = normalize_runtime_proxy_url(proxy or "")
+        self.no_proxy = str(no_proxy or "").strip()
+        self.playwright_proxy = build_playwright_proxy_settings(self.proxy, self.no_proxy)
         self.timeout_ms = timeout_ms
         self.log_callback = log_callback
         self.headless = self._resolve_headless(headless)
@@ -91,8 +99,8 @@ class ExaAutomation:
                 launch_kwargs: Dict[str, Any] = {
                     "headless": self.headless,
                 }
-                if self.proxy:
-                    launch_kwargs["proxy"] = {"server": self.proxy}
+                if self.playwright_proxy:
+                    launch_kwargs["proxy"] = dict(self.playwright_proxy)
                 launch_kwargs["args"] = ["--no-sandbox", "--disable-dev-shm-usage"]
                 if launch_env:
                     launch_kwargs["env"] = launch_env
@@ -146,6 +154,7 @@ class ExaAutomation:
                     except Exception:
                         pass
         except Exception as exc:
+            exc = self._map_proxy_error(exc)
             # 产品层会统一输出最终失败结论；这里避免对可预期业务错误重复记一条相同错误。
             if not isinstance(exc, ExaAutomationError):
                 self._log("error", f"❌ Exa 自动化失败: {exc}")
@@ -187,8 +196,8 @@ class ExaAutomation:
                     "headless": self.headless,
                     "args": ["--no-sandbox", "--disable-dev-shm-usage"],
                 }
-                if self.proxy:
-                    launch_kwargs["proxy"] = {"server": self.proxy}
+                if self.playwright_proxy:
+                    launch_kwargs["proxy"] = dict(self.playwright_proxy)
                 if launch_env:
                     launch_kwargs["env"] = launch_env
 
@@ -243,6 +252,7 @@ class ExaAutomation:
                     except Exception:
                         pass
         except Exception as exc:
+            exc = self._map_proxy_error(exc)
             result = {
                 "success": False,
                 "error": str(exc),
@@ -709,6 +719,24 @@ class ExaAutomation:
         except Exception:
             return
 
+    def _map_proxy_error(self, exc: Exception) -> Exception:
+        text = str(exc or "")
+        known_markers = (
+            "ERR_SOCKS_CONNECTION_FAILED",
+            "ERR_PROXY_CONNECTION_FAILED",
+            "ERR_NO_SUPPORTED_PROXIES",
+            "ERR_TUNNEL_CONNECTION_FAILED",
+            "NS_ERROR_PROXY_CONNECTION_REFUSED",
+        )
+        marker = next((item for item in known_markers if item in text), "")
+        if not marker:
+            return exc
+        return ExaAutomationError(
+            f"浏览器代理连接失败（{marker}），当前代理={sanitize_proxy_url(self.proxy) or 'disabled'}，"
+            f"请检查代理协议、地址、端口和账号密码是否正确。",
+            code="exa_proxy_connection_failed",
+        )
+
     def _dump_onboarding_debug(self, page) -> None:
         self._dump_page_debug(page, "onboarding")
 
@@ -848,7 +876,12 @@ class ExaAutomation:
 
     def _prepare_browser_launch_env(self) -> tuple[Optional[subprocess.Popen], Optional[Dict[str, str]]]:
         self._log("info", f"🧭 Exa 浏览器模式: {self.browser_mode}")
-        self._log("info", f"🔌 Exa 浏览器代理: {sanitize_proxy_url(self.proxy) or 'disabled'}")
+        auth_enabled = bool(self.playwright_proxy and (self.playwright_proxy.get("username") or self.playwright_proxy.get("password")))
+        self._log(
+            "info",
+            f"🔌 Exa 浏览器代理: {sanitize_proxy_url(self.proxy) or 'disabled'} "
+            f"(auth={'yes' if auth_enabled else 'no'}, bypass={format_no_proxy(self.no_proxy)})",
+        )
         if self.headless:
             return None, None
 

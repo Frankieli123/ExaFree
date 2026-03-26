@@ -15,7 +15,7 @@ NO_PROXY 格式:
 import logging
 import re
 from typing import Tuple, Callable, Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 import functools
 
 logger = logging.getLogger("exa.proxy")
@@ -246,6 +246,46 @@ def sanitize_proxy_url(proxy_str: str) -> str:
 def format_no_proxy(no_proxy: str) -> str:
     items = [item.strip() for item in str(no_proxy or "").split(",") if item.strip()]
     return ",".join(items) if items else "none"
+
+
+def build_playwright_proxy_settings(proxy_str: str, no_proxy: str = "") -> Optional[dict]:
+    """
+    将代理 URL 转为 Playwright proxy 配置。
+
+    Playwright 对代理的推荐结构是：
+    - server: scheme://host:port
+    - username/password: 单独字段
+    - bypass: 可选 no_proxy
+    """
+    normalized = normalize_runtime_proxy_url(proxy_str)
+    if not normalized:
+        return None
+
+    try:
+        parsed = urlparse(normalized)
+    except Exception:
+        return {"server": normalized}
+
+    if not parsed.scheme or not parsed.hostname:
+        return {"server": normalized}
+
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+
+    server = f"{parsed.scheme}://{host}"
+    if parsed.port:
+        server += f":{parsed.port}"
+
+    settings = {"server": server}
+    bypass = format_no_proxy(no_proxy)
+    if bypass != "none":
+        settings["bypass"] = bypass
+    if parsed.username is not None:
+        settings["username"] = unquote(parsed.username)
+    if parsed.password is not None:
+        settings["password"] = unquote(parsed.password)
+    return settings
 
 
 def _extract_proxy_for_log(proxies: Any) -> str:

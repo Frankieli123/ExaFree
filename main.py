@@ -2459,9 +2459,10 @@ async def admin_check_exa_browser(request: Request, payload: dict = Body(default
     if requested_mode not in ("", "headless", "headful"):
         requested_mode = ""
 
-    proxy_for_auth, _ = parse_proxy_setting(config.basic.proxy_for_auth)
+    proxy_for_auth, no_proxy_for_auth = parse_proxy_setting(config.basic.proxy_for_auth)
     automation = ExaAutomation(
         proxy=proxy_for_auth,
+        no_proxy=no_proxy_for_auth,
         timeout_ms=45_000,
         headless=(requested_mode == "headless") if requested_mode else None,
     )

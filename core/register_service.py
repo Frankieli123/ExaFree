@@ -178,9 +178,10 @@ class RegisterService(BaseTaskService[RegisterTask]):
             return {"success": False, "error": f"{provider} 邮箱地址未生成"}
         log_cb("info", f"✅ 邮箱创建成功: {client.email}")
 
-        proxy_for_auth, _ = parse_proxy_setting(config.basic.proxy_for_auth)
+        proxy_for_auth, no_proxy_for_auth = parse_proxy_setting(config.basic.proxy_for_auth)
         automation = ExaAutomation(
             proxy=proxy_for_auth,
+            no_proxy=no_proxy_for_auth,
             log_callback=log_cb,
         )
         if proxy_for_auth and automation.proxy != proxy_for_auth:
