@@ -83,7 +83,18 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 raise ValueError("已设置 ACCOUNTS_CONFIG 环境变量，注册功能已禁用")
 
             provider = (mail_provider or "").strip().lower() or (config.basic.temp_mail_provider or "duckmail").lower()
-            domain_value = (domain or "").strip() or ((config.basic.register_domain or "").strip() if provider == "duckmail" else "")
+            domain_value = (domain or "").strip()
+            if not domain_value:
+                if provider == "duckmail":
+                    domain_value = str(getattr(config.basic, "register_domain", "") or "").strip()
+                elif provider == "gptmail":
+                    domain_value = str(getattr(config.basic, "gptmail_domain", "") or "").strip()
+                elif provider == "moemail":
+                    domain_value = str(getattr(config.basic, "moemail_domain", "") or "").strip()
+                elif provider == "freemail":
+                    domain_value = str(getattr(config.basic, "freemail_domain", "") or "").strip()
+                elif provider == "cfmail":
+                    domain_value = str(getattr(config.basic, "cfmail_domain", "") or "").strip()
             domain_value = domain_value or None
             register_count = max(1, int(count or config.basic.register_default_count))
 
@@ -95,7 +106,11 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
             task = RegisterTask(id=str(uuid.uuid4()), count=register_count, domain=domain_value, mail_provider=provider)
             self._tasks[task.id] = task
-            self._append_log(task, "info", f"📝 创建 Exa 注册任务 (数量: {register_count}, 域名: {domain_value or 'default'}, 提供商: {provider})")
+            self._append_log(
+                task,
+                "info",
+                f"📝 创建 Exa 注册任务 (数量: {register_count}, 域名: {domain_value or 'auto'}, 提供商: {provider})",
+            )
             self._current_task_id = task.id
             asyncio.create_task(self._run_task_directly(task))
             return task
@@ -171,11 +186,11 @@ class RegisterService(BaseTaskService[RegisterTask]):
         register_proxy = proxy_for_auth
 
         log_cb("info", f"📧 步骤 1/4: 创建邮箱 (提供商={provider})...")
+        log_cb("info", f"📮 邮箱代理开关: {'enabled' if config.basic.mail_proxy_enabled else 'disabled'}")
         client = create_temp_mail_client(
             provider,
             domain=domain,
             log_cb=log_cb,
-            proxy=register_proxy if config.basic.mail_proxy_enabled else None,
         )
 
         if not client.register_account(domain=domain):
