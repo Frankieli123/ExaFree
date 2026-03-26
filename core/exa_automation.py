@@ -10,6 +10,7 @@ Exa 自动化登录与 API Key 提取。
 
 from __future__ import annotations
 
+import json
 import random
 import re
 import os
@@ -49,6 +50,28 @@ UUID_RE = re.compile(
 CHECKPOINT_CODE_RE = re.compile(r"\bcode\s*(\d+)\b", flags=re.IGNORECASE)
 DEBUG_ARTIFACT_TTL_SECONDS = 7 * 24 * 3600
 DEBUG_ARTIFACT_MAX_FILES = 30
+COUNTRY_HINT_RE = re.compile(r"_country-([a-z]{2})\b", flags=re.IGNORECASE)
+
+FINGERPRINT_VIEWPORTS = (
+    {"width": 1366, "height": 768},
+    {"width": 1920, "height": 1080},
+    {"width": 1536, "height": 864},
+    {"width": 1600, "height": 900},
+    {"width": 1440, "height": 900},
+    {"width": 1280, "height": 720},
+)
+
+FINGERPRINT_LOCALE_PROFILES = (
+    {"locale": "en-US", "languages": ["en-US", "en"], "accept_language": "en-US,en;q=0.9"},
+    {"locale": "en-GB", "languages": ["en-GB", "en"], "accept_language": "en-GB,en;q=0.9"},
+)
+
+FINGERPRINT_HARDWARE_PROFILES = (
+    {"hardwareConcurrency": 4, "deviceMemory": 4},
+    {"hardwareConcurrency": 8, "deviceMemory": 8},
+    {"hardwareConcurrency": 12, "deviceMemory": 8},
+    {"hardwareConcurrency": 16, "deviceMemory": 16},
+)
 
 
 class ExaAutomationError(RuntimeError):
@@ -80,6 +103,11 @@ class ExaAutomation:
         self.log_callback = log_callback
         self.headless = self._resolve_headless(headless)
         self.browser_mode = "headless" if self.headless else "headful"
+        self._fp_viewport = dict(random.choice(FINGERPRINT_VIEWPORTS))
+        self._fp_locale_profile = dict(self._pick_locale_profile(self.proxy_source))
+        self._fp_hw_profile = dict(random.choice(FINGERPRINT_HARDWARE_PROFILES))
+        self.browser_fingerprint: Dict[str, Any] = {}
+        self.fingerprint_init_script = ""
 
     def register_and_setup(
         self,
@@ -110,22 +138,18 @@ class ExaAutomation:
                 }
                 if self.playwright_proxy:
                     launch_kwargs["proxy"] = dict(self.playwright_proxy)
-                launch_kwargs["args"] = ["--no-sandbox", "--disable-dev-shm-usage"]
+                launch_kwargs["args"] = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                ]
                 if launch_env:
                     launch_kwargs["env"] = launch_env
 
                 browser = p.chromium.launch(**launch_kwargs)
-                context = browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                    ),
-                    locale="en-US",
-                    viewport={"width": 1366, "height": 768},
-                )
-                context.add_init_script(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-                )
+                self._ensure_fingerprint(browser)
+                context = browser.new_context(**self._build_context_kwargs())
+                context.add_init_script(self.fingerprint_init_script)
                 page = context.new_page()
 
                 try:
@@ -205,7 +229,11 @@ class ExaAutomation:
                 xvfb_process, launch_env = self._prepare_browser_launch_env()
                 launch_kwargs: Dict[str, Any] = {
                     "headless": self.headless,
-                    "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+                    "args": [
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-blink-features=AutomationControlled",
+                    ],
                 }
                 if self.playwright_proxy:
                     launch_kwargs["proxy"] = dict(self.playwright_proxy)
@@ -213,17 +241,9 @@ class ExaAutomation:
                     launch_kwargs["env"] = launch_env
 
                 browser = p.chromium.launch(**launch_kwargs)
-                context = browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                    ),
-                    locale="en-US",
-                    viewport={"width": 1366, "height": 768},
-                )
-                context.add_init_script(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-                )
+                self._ensure_fingerprint(browser)
+                context = browser.new_context(**self._build_context_kwargs())
+                context.add_init_script(self.fingerprint_init_script)
                 page = context.new_page()
 
                 try:
@@ -723,6 +743,115 @@ class ExaAutomation:
         if last_exc:
             raise last_exc
 
+    @staticmethod
+    def _extract_chromium_major(version_text: str) -> Optional[int]:
+        if not version_text:
+            return None
+        # Examples: "Chromium 145.0.7632.159" / "145.0.7632.159"
+        m = re.search(r"(\d{2,3})\.", version_text)
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    def _ensure_fingerprint(self, browser) -> None:
+        if self.browser_fingerprint and self.fingerprint_init_script:
+            return
+
+        version_attr = getattr(browser, "version", "")
+        try:
+            version_text = version_attr() if callable(version_attr) else version_attr
+        except Exception:
+            version_text = ""
+        chromium_major = self._extract_chromium_major(str(version_text or ""))
+        if not chromium_major:
+            chromium_major = 120
+
+        viewport = dict(self._fp_viewport or random.choice(FINGERPRINT_VIEWPORTS))
+        locale_profile = dict(self._fp_locale_profile or random.choice(FINGERPRINT_LOCALE_PROFILES))
+        hw_profile = dict(self._fp_hw_profile or random.choice(FINGERPRINT_HARDWARE_PROFILES))
+
+        # Keep OS + UA consistent with the real runtime (Linux in server/docker),
+        # so UA-CH and other derived signals are less likely to conflict.
+        user_agent = (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            f"(KHTML, like Gecko) Chrome/{chromium_major}.0.0.0 Safari/537.36"
+        )
+
+        self.browser_fingerprint = {
+            "name": f"linux_chrome_{chromium_major}_{viewport['width']}x{viewport['height']}",
+            "chromium_major": chromium_major,
+            "user_agent": user_agent,
+            "platform": "Linux x86_64",
+            "viewport": viewport,
+            **locale_profile,
+            **hw_profile,
+        }
+        self.fingerprint_init_script = self._build_fingerprint_init_script()
+
+        self._log(
+            "info",
+            f"🧬 Exa 指纹模板: {self.browser_fingerprint.get('name')} "
+            f"(platform={self.browser_fingerprint.get('platform')}, "
+            f"viewport={viewport['width']}x{viewport['height']}, "
+            f"locale={self.browser_fingerprint.get('locale')})",
+        )
+
+    @staticmethod
+    def _pick_locale_profile(proxy_text: str) -> Dict[str, Any]:
+        """
+        Prefer a locale that matches proxy geo hint (best-effort).
+        Falls back to en-US when no hint exists.
+        """
+        m = COUNTRY_HINT_RE.search(proxy_text or "")
+        cc = (m.group(1) if m else "").lower()
+        if cc in ("gb", "uk"):
+            return dict(FINGERPRINT_LOCALE_PROFILES[1])
+        if cc == "us":
+            return dict(FINGERPRINT_LOCALE_PROFILES[0])
+        return dict(FINGERPRINT_LOCALE_PROFILES[0])
+
+    def _build_context_kwargs(self) -> Dict[str, Any]:
+        accept_language = str(self.browser_fingerprint.get("accept_language") or "").strip()
+        settings = {
+            "user_agent": str(self.browser_fingerprint.get("user_agent") or ""),
+            "locale": str(self.browser_fingerprint.get("locale") or "en-US"),
+            "viewport": self.browser_fingerprint.get("viewport") or {"width": 1366, "height": 768},
+        }
+        if accept_language:
+            settings["extra_http_headers"] = {"accept-language": accept_language}
+        return settings
+
+    def _build_fingerprint_init_script(self) -> str:
+        fp_payload = json.dumps(
+            {
+                "platform": self.browser_fingerprint.get("platform") or "Win32",
+                "languages": self.browser_fingerprint.get("languages") or ["en-US", "en"],
+                "hardwareConcurrency": int(self.browser_fingerprint.get("hardwareConcurrency") or 8),
+                "deviceMemory": int(self.browser_fingerprint.get("deviceMemory") or 8),
+            }
+        )
+        return f"""
+(() => {{
+  const fp = {fp_payload};
+  const override = (key, value) => {{
+    try {{
+      Object.defineProperty(navigator, key, {{
+        get: () => value,
+        configurable: true
+      }});
+    }} catch (e) {{}}
+  }};
+  override('webdriver', undefined);
+  override('platform', fp.platform);
+  override('languages', fp.languages);
+  override('hardwareConcurrency', fp.hardwareConcurrency);
+  override('deviceMemory', fp.deviceMemory);
+}})();
+"""
+
     def _log(self, level: str, message: str) -> None:
         if not self.log_callback:
             return
@@ -938,13 +1067,17 @@ class ExaAutomation:
 
         for display_num in range(90, 110):
             display_name = f":{display_num}"
+            width = int((self._fp_viewport or {}).get("width") or 1366)
+            height = int((self._fp_viewport or {}).get("height") or 768)
+            width = max(800, min(width, 4096))
+            height = max(600, min(height, 2160))
             proc = subprocess.Popen(
                 [
                     xvfb_path,
                     display_name,
                     "-screen",
                     "0",
-                    "1366x768x24",
+                    f"{width}x{height}x24",
                     "-nolisten",
                     "tcp",
                 ],
