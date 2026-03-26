@@ -401,6 +401,17 @@ class ExaAutomation:
         if "onboarding" not in page.url:
             return None
 
+        def onboarding_completed() -> bool:
+            try:
+                text = (page.inner_text("body") or "").lower()
+            except Exception:
+                return False
+            return (
+                "you're all set" in text
+                or "you received $10" in text
+                or "free credits" in text
+            )
+
         next_selectors = [
             'button:has-text("Next")',
             'button:has-text("Continue")',
@@ -447,6 +458,8 @@ class ExaAutomation:
             onboarding_key = self._extract_first_uuid(page.inner_text("body"))
             if onboarding_key:
                 break
+            if onboarding_completed():
+                break
 
             # 如果仍在 step1，继续尝试推进到下一步
             next_btn = self._first_visible_locator(page, next_selectors)
@@ -473,8 +486,11 @@ class ExaAutomation:
 
         # onboarding 仍未完成时直接失败，避免产出“未领新手奖励”的账号。
         if "dashboard.exa.ai" in page.url and "onboarding" in page.url:
-            self._dump_onboarding_debug(page)
-            raise RuntimeError(f"onboarding 未完成，仍停留在: {page.url}")
+            if onboarding_completed():
+                self._log("info", "✅ onboarding 已完成（页面停留在 onboarding），继续后续流程")
+            else:
+                self._dump_onboarding_debug(page)
+                raise RuntimeError(f"onboarding 未完成，仍停留在: {page.url}")
 
         if not onboarding_key:
             self._log("warning", "⚠️ onboarding 未提取到生成 key，可能未触发完整新手引导奖励")
