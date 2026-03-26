@@ -11,12 +11,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError
 from core.config import config
 from core.exa_automation import ExaAutomation
 from core.mail_providers import create_temp_mail_client
-from core.proxy_utils import (
-    parse_proxy_setting,
-    sanitize_proxy_url,
-    is_evomi_proxy,
-    build_evomi_session_proxy,
-)
+from core.proxy_utils import parse_proxy_setting, sanitize_proxy_url
 
 logger = logging.getLogger("exa.register")
 EMAIL_LOGIN_RETRY_LIMIT = 3
@@ -174,13 +169,6 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         proxy_for_auth, no_proxy_for_auth = parse_proxy_setting(config.basic.proxy_for_auth)
         register_proxy = proxy_for_auth
-        register_session_id = ""
-        if is_evomi_proxy(proxy_for_auth):
-            register_proxy, register_session_id = build_evomi_session_proxy(proxy_for_auth)
-            log_cb(
-                "info",
-                f"♻️ 本次注册已分配新的 Evomi 会话: session={register_session_id}",
-            )
 
         log_cb("info", f"📧 步骤 1/4: 创建邮箱 (提供商={provider})...")
         client = create_temp_mail_client(
