@@ -297,6 +297,7 @@ class ExaAutomation:
             self._close_proxy_bridge()
 
     def _login_with_otp(self, page, email: str, mail_client, start_time: datetime) -> None:
+        self._probe_auth_exit_ip(page)
         auth_url = "https://auth.exa.ai/?callbackUrl=https%3A%2F%2Fdashboard.exa.ai%2F"
         self._safe_goto(
             page,
@@ -384,6 +385,48 @@ class ExaAutomation:
             raise RuntimeError("OTP 无效，Exa 返回 Invalid verification code")
 
         self._log("info", f"✅ OTP 提交后已进入: {page.url}")
+
+    @staticmethod
+    def _parse_cloudflare_trace(text: str) -> Dict[str, str]:
+        data: Dict[str, str] = {}
+        for raw in str(text or "").splitlines():
+            line = raw.strip()
+            if not line or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if key:
+                data[key] = value
+        return data
+
+    def _probe_auth_exit_ip(self, page) -> None:
+        """
+        Best-effort: probe auth.exa.ai Cloudflare trace to log current exit IP.
+
+        This is useful for confirming whether proxy IP changes between retries.
+        It MUST NOT block the main registration flow when the probe fails.
+        """
+        try:
+            page.goto(
+                "https://auth.exa.ai/cdn-cgi/trace",
+                wait_until="domcontentloaded",
+                timeout=15_000,
+            )
+            trace_text = (page.inner_text("body") or "").strip()
+            data = self._parse_cloudflare_trace(trace_text)
+            ip = (data.get("ip") or "").strip()
+            if not ip:
+                return
+            extras = []
+            for key in ("loc", "colo", "http"):
+                value = (data.get(key) or "").strip()
+                if value:
+                    extras.append(f"{key}={value}")
+            suffix = f" ({', '.join(extras)})" if extras else ""
+            self._log("info", f"🌍 auth.exa.ai 出口 IP: {ip}{suffix}")
+        except Exception as exc:
+            self._log("warning", f"⚠️ auth.exa.ai 出口 IP 探测失败: {exc}")
 
     def _complete_onboarding(self, page) -> Optional[str]:
         onboarding_key = None
