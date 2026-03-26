@@ -56,7 +56,7 @@ from core.account import (
     bulk_update_account_disabled_status as _bulk_update_account_disabled_status,
     bulk_delete_accounts as _bulk_delete_accounts
 )
-from core.proxy_utils import normalize_runtime_proxy_url, parse_proxy_setting
+from core.proxy_utils import normalize_runtime_proxy_url, parse_proxy_setting, sanitize_proxy_url, format_no_proxy
 from core.exa_automation import ExaAutomation
 
 # 导入 Uptime 追踪器
@@ -376,6 +376,26 @@ def build_retry_policy() -> RetryPolicy:
 RETRY_POLICY = build_retry_policy()
 
 
+def _proxy_log_value(proxy: str) -> str:
+    return sanitize_proxy_url(proxy) or "disabled"
+
+
+def _log_proxy_configuration(proxy_auth: str, no_proxy_auth: str, proxy_chat: str, no_proxy_chat: str) -> None:
+    logger.info(
+        "[PROXY] Account operations config=%s runtime=%s no_proxy=%s",
+        _proxy_log_value(proxy_auth),
+        _proxy_log_value(normalize_runtime_proxy_url(proxy_auth)),
+        format_no_proxy(no_proxy_auth),
+    )
+    logger.info(
+        "[PROXY] Chat operations config=%s runtime=%s no_proxy=%s",
+        _proxy_log_value(proxy_chat),
+        _proxy_log_value(normalize_runtime_proxy_url(proxy_chat)),
+        format_no_proxy(no_proxy_chat),
+    )
+    logger.info("[PROXY] Effective NO_PROXY=%s", format_no_proxy(os.environ.get("NO_PROXY", "")))
+
+
 def _default_user_auth_policy() -> dict:
     return {
         "registration_enabled": True,
@@ -473,8 +493,7 @@ http_client_auth = httpx.AsyncClient(
 )
 
 # 打印代理配置日志
-logger.info(f"[PROXY] Account operations (register): {PROXY_FOR_AUTH if PROXY_FOR_AUTH else 'disabled'}")
-logger.info(f"[PROXY] Chat operations (JWT/session/messages): {PROXY_FOR_CHAT if PROXY_FOR_CHAT else 'disabled'}")
+_log_proxy_configuration(_proxy_auth, _no_proxy_auth, _proxy_chat, _no_proxy_chat)
 
 # ---------- 常量定义 ----------
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
@@ -2398,9 +2417,8 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
                 )
             )
 
-            # 打印新的代理配置
-            logger.info(f"[PROXY] Account operations (register): {PROXY_FOR_AUTH if PROXY_FOR_AUTH else 'disabled'}")
-            logger.info(f"[PROXY] Chat operations (JWT/session/messages): {PROXY_FOR_CHAT if PROXY_FOR_CHAT else 'disabled'}")
+            # 打印新的代理配置（脱敏）
+            _log_proxy_configuration(_proxy_auth, _no_proxy_auth, _proxy_chat, _no_proxy_chat)
 
             # 更新所有账户的 http_client 引用（对话用）
             multi_account_mgr.update_http_client(http_client)

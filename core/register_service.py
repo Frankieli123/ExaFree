@@ -11,7 +11,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError
 from core.config import config
 from core.exa_automation import ExaAutomation
 from core.mail_providers import create_temp_mail_client
-from core.proxy_utils import parse_proxy_setting
+from core.proxy_utils import parse_proxy_setting, sanitize_proxy_url
 
 logger = logging.getLogger("exa.register")
 EMAIL_LOGIN_RETRY_LIMIT = 3
@@ -183,6 +183,13 @@ class RegisterService(BaseTaskService[RegisterTask]):
             proxy=proxy_for_auth,
             log_callback=log_cb,
         )
+        if proxy_for_auth and automation.proxy != proxy_for_auth:
+            log_cb(
+                "info",
+                f"🔁 浏览器代理兼容转换: {sanitize_proxy_url(proxy_for_auth)} -> {sanitize_proxy_url(automation.proxy)}",
+            )
+        else:
+            log_cb("info", f"🔌 账户操作代理: {sanitize_proxy_url(proxy_for_auth) or 'disabled'}")
         log_cb("info", f"🌐 步骤 2/4: 启动浏览器 (模式={automation.browser_mode})...")
         self._add_cancel_hook(task.id, lambda: None)
 

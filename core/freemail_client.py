@@ -44,6 +44,8 @@ class FreemailClient:
                 method,
                 url,
                 proxies=self.proxies,
+                proxy_log_cb=self._log,
+                proxy_log_context="freemail",
                 verify=self.verify_ssl,
                 timeout=kwargs.pop("timeout", 15),
                 **kwargs,

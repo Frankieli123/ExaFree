@@ -164,6 +164,7 @@ class AccountManager:
         self.failure_count = 0  # 累计失败次数（用于统计展示）
         self.session_usage_count = 0  # 本次启动后使用次数（用于均衡轮询）
         self.disabled_reason: Optional[str] = None  # 自动禁用原因（如 "403 Access Restricted"）
+        self.jwt_manager = None  # 兼容旧热更新逻辑
 
     def handle_non_http_error(self, error_context: str = "", request_id: str = "", quota_type: Optional[str] = None) -> None:
         """
@@ -584,7 +585,7 @@ class MultiAccountManager:
         """更新所有账户使用的 http_client（用于代理变更后重建客户端）"""
         for account_mgr in self.accounts.values():
             account_mgr.http_client = http_client
-            if account_mgr.jwt_manager is not None:
+            if getattr(account_mgr, "jwt_manager", None) is not None:
                 account_mgr.jwt_manager.http_client = http_client
 
     def add_account(

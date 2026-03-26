@@ -52,6 +52,8 @@ class DuckMailClient:
                 method,
                 url,
                 proxies=self.proxies,
+                proxy_log_cb=self._log,
+                proxy_log_context="duckmail",
                 verify=self.verify_ssl,
                 timeout=kwargs.pop("timeout", 15),
                 **kwargs,

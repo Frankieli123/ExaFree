@@ -87,6 +87,8 @@ class CloudflareMailClient:
                 method,
                 url,
                 proxies=proxies,
+                proxy_log_cb=self._log,
+                proxy_log_context="cfmail",
                 verify=self.verify_ssl,
                 timeout=kwargs.pop("timeout", 30),
                 **kwargs,

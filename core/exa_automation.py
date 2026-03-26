@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from core.config import config
-from core.proxy_utils import normalize_runtime_proxy_url
+from core.proxy_utils import normalize_runtime_proxy_url, sanitize_proxy_url
 
 try:
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -848,6 +848,7 @@ class ExaAutomation:
 
     def _prepare_browser_launch_env(self) -> tuple[Optional[subprocess.Popen], Optional[Dict[str, str]]]:
         self._log("info", f"🧭 Exa 浏览器模式: {self.browser_mode}")
+        self._log("info", f"🔌 Exa 浏览器代理: {sanitize_proxy_url(self.proxy) or 'disabled'}")
         if self.headless:
             return None, None
 

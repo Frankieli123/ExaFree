@@ -12,10 +12,13 @@ NO_PROXY 格式:
 - 支持通配符前缀，如 .local 匹配 *.local
 """
 
+import logging
 import re
 from typing import Tuple, Callable, Any, Optional
 from urllib.parse import urlparse
 import functools
+
+logger = logging.getLogger("exa.proxy")
 
 
 def parse_proxy_setting(proxy_str: str) -> Tuple[str, str]:
@@ -197,6 +200,82 @@ def normalize_runtime_proxy_url(proxy_str: str) -> str:
     return normalized
 
 
+def _mask_text(value: str, keep_start: int = 2, keep_end: int = 1) -> str:
+    value = str(value or "")
+    if not value:
+        return ""
+    if len(value) <= keep_start + keep_end:
+        return "***"
+    return f"{value[:keep_start]}***{value[-keep_end:]}"
+
+
+def sanitize_proxy_url(proxy_str: str) -> str:
+    """
+    返回适合日志输出的代理地址（自动隐藏账号密码）。
+    """
+    normalized = normalize_proxy_url(proxy_str)
+    if not normalized:
+        return ""
+
+    try:
+        parsed = urlparse(normalized)
+    except Exception:
+        return normalized
+
+    if not parsed.scheme or not parsed.hostname:
+        return normalized
+
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+
+    auth = ""
+    if parsed.username is not None:
+        auth = _mask_text(parsed.username)
+        if parsed.password is not None:
+            auth += ":***"
+        auth += "@"
+
+    netloc = f"{auth}{host}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+
+    return f"{parsed.scheme}://{netloc}"
+
+
+def format_no_proxy(no_proxy: str) -> str:
+    items = [item.strip() for item in str(no_proxy or "").split(",") if item.strip()]
+    return ",".join(items) if items else "none"
+
+
+def _extract_proxy_for_log(proxies: Any) -> str:
+    if isinstance(proxies, dict):
+        for key in ("https", "http", "all"):
+            value = proxies.get(key)
+            if value:
+                return str(value)
+        return ""
+    return str(proxies or "")
+
+
+def _emit_proxy_log(level: str, message: str, log_callback=None) -> None:
+    try:
+        if level == "error":
+            logger.error(message)
+        elif level == "warning":
+            logger.warning(message)
+        else:
+            logger.info(message)
+    except Exception:
+        pass
+
+    if log_callback:
+        try:
+            log_callback(level, message)
+        except Exception:
+            pass
+
+
 def request_with_proxy_fallback(request_func: Callable, *args, **kwargs) -> Any:
     """
     带代理失败回退的请求包装器
@@ -213,6 +292,9 @@ def request_with_proxy_fallback(request_func: Callable, *args, **kwargs) -> Any:
     Raises:
         原始异常（如果直连也失败）
     """
+    proxy_log_cb = kwargs.pop("proxy_log_cb", None)
+    proxy_log_context = str(kwargs.pop("proxy_log_context", "") or "request").strip()
+
     # 代理相关的错误类型
     PROXY_ERRORS = (
         "ProxyError",
@@ -232,18 +314,37 @@ def request_with_proxy_fallback(request_func: Callable, *args, **kwargs) -> Any:
 
         # 检查是否是代理相关错误
         is_proxy_error = any(err in error_str or err in error_type for err in PROXY_ERRORS)
+        original_proxies = kwargs.get("proxies")
 
-        if is_proxy_error and "proxies" in kwargs:
+        if is_proxy_error and original_proxies:
             # 禁用代理重试
-            original_proxies = kwargs.get("proxies")
+            proxy_text = sanitize_proxy_url(_extract_proxy_for_log(original_proxies)) or "disabled"
+            _emit_proxy_log(
+                "warning",
+                f"[PROXY] {proxy_log_context} 代理请求失败，回退直连: "
+                f"proxy={proxy_text}, error={error_type}: {error_str[:160]}",
+                proxy_log_cb,
+            )
             kwargs["proxies"] = None
 
             try:
                 # 直连重试
-                return request_func(*args, **kwargs)
-            except Exception:
+                response = request_func(*args, **kwargs)
+                _emit_proxy_log(
+                    "warning",
+                    f"[PROXY] {proxy_log_context} 直连重试成功",
+                    proxy_log_cb,
+                )
+                return response
+            except Exception as direct_exc:
                 # 直连也失败，恢复原始代理设置并抛出原始异常
                 kwargs["proxies"] = original_proxies
+                _emit_proxy_log(
+                    "error",
+                    f"[PROXY] {proxy_log_context} 直连重试也失败: "
+                    f"{type(direct_exc).__name__}: {str(direct_exc)[:160]}",
+                    proxy_log_cb,
+                )
                 raise e
         else:
             # 不是代理错误，直接抛出

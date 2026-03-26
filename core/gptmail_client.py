@@ -61,6 +61,8 @@ class GPTMailClient:
             method,
             url,
             proxies=proxies,
+            proxy_log_cb=self._log,
+            proxy_log_context="gptmail",
             verify=self.verify_ssl,
             timeout=kwargs.pop("timeout", 15),
             **kwargs,
