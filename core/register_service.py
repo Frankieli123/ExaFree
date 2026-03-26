@@ -14,8 +14,8 @@ from core.mail_providers import create_temp_mail_client
 from core.proxy_utils import parse_proxy_setting, sanitize_proxy_url
 
 logger = logging.getLogger("exa.register")
-EMAIL_LOGIN_RETRY_LIMIT = 3
-EMAIL_LOGIN_RETRY_SLEEP_SECONDS = 5
+EMAIL_LOGIN_RETRY_LIMIT = 12
+EMAIL_LOGIN_RETRY_SLEEP_SECONDS = 1
 
 
 @dataclass
@@ -214,6 +214,13 @@ class RegisterService(BaseTaskService[RegisterTask]):
         for attempt in range(1, EMAIL_LOGIN_RETRY_LIMIT + 1):
             if attempt > 1:
                 log_cb("warning", f"⚠️ Exa 邮箱登录暂不可用，开始第 {attempt}/{EMAIL_LOGIN_RETRY_LIMIT} 次重试...")
+            # 每次重试都新建自动化实例，确保指纹/浏览器环境重新抽样，
+            # 并让代理出口更容易切换到不同 IP。
+            automation = ExaAutomation(
+                proxy=register_proxy,
+                no_proxy=no_proxy_for_auth,
+                log_callback=log_cb,
+            )
             result = automation.register_and_setup(
                 email=client.email,
                 mail_client=client,
