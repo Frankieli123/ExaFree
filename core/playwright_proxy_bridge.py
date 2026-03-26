@@ -54,9 +54,16 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 headers.append(line)
 
             if method.upper() == "CONNECT":
+                logger.info("[PROXY] bridge CONNECT target=%s via=%s", target, sanitize_proxy_url(bridge.proxy_url))
                 bridge.handle_connect(self.connection, target)
                 return
 
+            logger.info(
+                "[PROXY] bridge %s target=%s via=%s",
+                method.upper(),
+                target,
+                sanitize_proxy_url(bridge.proxy_url),
+            )
             bridge.handle_http_request(
                 client_sock=self.connection,
                 method=method,
@@ -74,7 +81,7 @@ class _BridgeHandler(socketserver.StreamRequestHandler):
                 )
             except Exception:
                 pass
-            logger.debug("[PROXY] bridge request failed: %s", exc)
+            logger.warning("[PROXY] bridge request failed via=%s err=%s", sanitize_proxy_url(bridge.proxy_url), exc)
 
 
 class PlaywrightSocksBridge:
@@ -180,6 +187,12 @@ class PlaywrightSocksBridge:
         sock.sendall(req)
         resp = self._recv_proxy_response_headers(sock)
         line = resp.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
+        logger.info(
+            "[PROXY] upstream CONNECT %s via=%s -> %s",
+            target,
+            sanitize_proxy_url(self.proxy_url),
+            line,
+        )
         if " 200 " not in f" {line} " and not line.startswith("HTTP/1.1 200") and not line.startswith("HTTP/1.0 200"):
             try:
                 sock.close()
