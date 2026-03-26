@@ -14,11 +14,15 @@ NO_PROXY 格式:
 
 import logging
 import re
+import secrets
+import string
 from typing import Tuple, Callable, Any, Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 import functools
 
 logger = logging.getLogger("exa.proxy")
+_SESSION_PARAM_RE = re.compile(r"_(?:hard)?session-[a-z0-9]+", re.IGNORECASE)
+_LIFETIME_PARAM_RE = re.compile(r"_lifetime-\d+", re.IGNORECASE)
 
 
 def parse_proxy_setting(proxy_str: str) -> Tuple[str, str]:
@@ -246,6 +250,69 @@ def sanitize_proxy_url(proxy_str: str) -> str:
 def format_no_proxy(no_proxy: str) -> str:
     items = [item.strip() for item in str(no_proxy or "").split(",") if item.strip()]
     return ",".join(items) if items else "none"
+
+
+def generate_proxy_session_id(length: int = 8) -> str:
+    size = max(6, min(int(length or 8), 10))
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(size))
+
+
+def is_evomi_proxy(proxy_str: str) -> bool:
+    normalized = normalize_proxy_url(proxy_str)
+    if not normalized:
+        return False
+    try:
+        parsed = urlparse(normalized)
+    except Exception:
+        return False
+    host = str(parsed.hostname or "").lower()
+    return "evomi.com" in host and parsed.username is not None and parsed.password is not None
+
+
+def build_evomi_session_proxy(
+    proxy_str: str,
+    *,
+    session_id: Optional[str] = None,
+    hard_session: bool = False,
+    lifetime_minutes: Optional[int] = None,
+) -> tuple[str, str]:
+    """
+    为 Evomi 代理生成带 session/hardsession 的新代理地址。
+
+    Evomi 的 session 参数附加在密码段中，例如：
+    http://user:pass_country-US_session-abc123@rp.evomi.com:1000
+    """
+    normalized = normalize_proxy_url(proxy_str)
+    if not normalized:
+        return "", ""
+
+    parsed = urlparse(normalized)
+    if parsed.username is None or parsed.password is None:
+        return normalized, ""
+
+    session_token = str(session_id or generate_proxy_session_id()).strip().lower()
+    session_token = re.sub(r"[^a-z0-9]", "", session_token)[:10]
+    if len(session_token) < 6:
+        session_token = generate_proxy_session_id()
+
+    password = unquote(parsed.password or "")
+    password = _SESSION_PARAM_RE.sub("", password)
+    password = _LIFETIME_PARAM_RE.sub("", password)
+
+    suffix = f"_{'hardsession' if hard_session else 'session'}-{session_token}"
+    if not hard_session and lifetime_minutes:
+        lifetime = max(1, min(int(lifetime_minutes), 120))
+        suffix += f"_lifetime-{lifetime}"
+    password = f"{password}{suffix}"
+
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{quote(unquote(parsed.username or ''), safe='-._~')}:{quote(password, safe='-._~')}@{host}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return f"{parsed.scheme}://{netloc}", session_token
 
 
 def build_playwright_proxy_settings(proxy_str: str, no_proxy: str = "") -> Optional[dict]:

@@ -24,8 +24,7 @@ from urllib.parse import urlparse
 from core.config import config
 from core.playwright_proxy_bridge import (
     proxy_needs_playwright_bridge,
-    ensure_playwright_bridge,
-    build_playwright_bridge_proxy_settings,
+    PlaywrightSocksBridge,
 )
 from core.proxy_utils import (
     normalize_proxy_url,
@@ -75,10 +74,8 @@ class ExaAutomation:
         self.proxy = normalize_runtime_proxy_url(self.proxy_source)
         self.no_proxy = str(no_proxy or "").strip()
         self.proxy_bridge = None
+        self.needs_proxy_bridge = proxy_needs_playwright_bridge(self.proxy_source)
         self.playwright_proxy = build_playwright_proxy_settings(self.proxy_source, self.no_proxy)
-        if proxy_needs_playwright_bridge(self.proxy_source):
-            self.proxy_bridge = ensure_playwright_bridge(self.proxy_source)
-            self.playwright_proxy = build_playwright_bridge_proxy_settings(self.proxy_source, self.no_proxy)
         self.timeout_ms = timeout_ms
         self.log_callback = log_callback
         self.headless = self._resolve_headless(headless)
@@ -105,6 +102,7 @@ class ExaAutomation:
 
         xvfb_process = None
         try:
+            self._ensure_proxy_bridge()
             with sync_playwright() as p:
                 xvfb_process, launch_env = self._prepare_browser_launch_env()
                 launch_kwargs: Dict[str, Any] = {
@@ -175,6 +173,7 @@ class ExaAutomation:
             return result
         finally:
             self._stop_virtual_display(xvfb_process)
+            self._close_proxy_bridge()
 
     def refresh_api_key(
         self,
@@ -201,6 +200,7 @@ class ExaAutomation:
 
         xvfb_process = None
         try:
+            self._ensure_proxy_bridge()
             with sync_playwright() as p:
                 xvfb_process, launch_env = self._prepare_browser_launch_env()
                 launch_kwargs: Dict[str, Any] = {
@@ -274,6 +274,7 @@ class ExaAutomation:
             return result
         finally:
             self._stop_virtual_display(xvfb_process)
+            self._close_proxy_bridge()
 
     def _login_with_otp(self, page, email: str, mail_client, start_time: datetime) -> None:
         auth_url = "https://auth.exa.ai/?callbackUrl=https%3A%2F%2Fdashboard.exa.ai%2F"
@@ -748,6 +749,24 @@ class ExaAutomation:
             f"请检查代理协议、地址、端口和账号密码是否正确。",
             code="exa_proxy_connection_failed",
         )
+
+    def _close_proxy_bridge(self) -> None:
+        if self.proxy_bridge is None:
+            return
+        try:
+            self.proxy_bridge.close()
+        except Exception:
+            pass
+        self.proxy_bridge = None
+
+    def _ensure_proxy_bridge(self) -> None:
+        if not self.needs_proxy_bridge or self.proxy_bridge is not None:
+            return
+        self.proxy_bridge = PlaywrightSocksBridge(self.proxy_source).start()
+        self.playwright_proxy = {"server": self.proxy_bridge.local_url}
+        bypass = format_no_proxy(self.no_proxy)
+        if bypass != "none":
+            self.playwright_proxy["bypass"] = bypass
 
     def _dump_onboarding_debug(self, page) -> None:
         self._dump_page_debug(page, "onboarding")

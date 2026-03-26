@@ -11,7 +11,12 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError
 from core.config import config
 from core.exa_automation import ExaAutomation
 from core.mail_providers import create_temp_mail_client
-from core.proxy_utils import parse_proxy_setting, sanitize_proxy_url
+from core.proxy_utils import (
+    parse_proxy_setting,
+    sanitize_proxy_url,
+    is_evomi_proxy,
+    build_evomi_session_proxy,
+)
 
 logger = logging.getLogger("exa.register")
 EMAIL_LOGIN_RETRY_LIMIT = 3
@@ -167,8 +172,23 @@ class RegisterService(BaseTaskService[RegisterTask]):
         if provider == "freemail" and not config.basic.freemail_jwt_token:
             return {"success": False, "error": "Freemail JWT Token 未配置"}
 
+        proxy_for_auth, no_proxy_for_auth = parse_proxy_setting(config.basic.proxy_for_auth)
+        register_proxy = proxy_for_auth
+        register_session_id = ""
+        if is_evomi_proxy(proxy_for_auth):
+            register_proxy, register_session_id = build_evomi_session_proxy(proxy_for_auth)
+            log_cb(
+                "info",
+                f"♻️ 本次注册已分配新的 Evomi 会话: session={register_session_id}",
+            )
+
         log_cb("info", f"📧 步骤 1/4: 创建邮箱 (提供商={provider})...")
-        client = create_temp_mail_client(provider, domain=domain, log_cb=log_cb)
+        client = create_temp_mail_client(
+            provider,
+            domain=domain,
+            log_cb=log_cb,
+            proxy=register_proxy if config.basic.mail_proxy_enabled else None,
+        )
 
         if not client.register_account(domain=domain):
             self._cleanup_mail(client, log_cb)
@@ -178,19 +198,18 @@ class RegisterService(BaseTaskService[RegisterTask]):
             return {"success": False, "error": f"{provider} 邮箱地址未生成"}
         log_cb("info", f"✅ 邮箱创建成功: {client.email}")
 
-        proxy_for_auth, no_proxy_for_auth = parse_proxy_setting(config.basic.proxy_for_auth)
         automation = ExaAutomation(
-            proxy=proxy_for_auth,
+            proxy=register_proxy,
             no_proxy=no_proxy_for_auth,
             log_callback=log_cb,
         )
-        if proxy_for_auth and automation.proxy != proxy_for_auth:
+        if register_proxy and automation.proxy != register_proxy:
             log_cb(
                 "info",
-                f"🔁 浏览器代理兼容转换: {sanitize_proxy_url(proxy_for_auth)} -> {sanitize_proxy_url(automation.proxy)}",
+                f"🔁 浏览器代理兼容转换: {sanitize_proxy_url(register_proxy)} -> {sanitize_proxy_url(automation.proxy)}",
             )
         else:
-            log_cb("info", f"🔌 账户操作代理: {sanitize_proxy_url(proxy_for_auth) or 'disabled'}")
+            log_cb("info", f"🔌 账户操作代理: {sanitize_proxy_url(register_proxy) or 'disabled'}")
         log_cb("info", f"🌐 步骤 2/4: 启动浏览器 (模式={automation.browser_mode})...")
         self._add_cancel_hook(task.id, lambda: None)
 
