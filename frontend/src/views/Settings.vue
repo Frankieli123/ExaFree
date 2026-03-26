@@ -34,6 +34,20 @@
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="自动检测或手动填写"
                 />
+                <label class="block text-xs text-muted-foreground">账户操作代理</label>
+                <input
+                  v-model="localSettings.basic.proxy_for_auth"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
+                />
+                <label class="block text-xs text-muted-foreground">对话操作代理</label>
+                <input
+                  v-model="localSettings.basic.proxy_for_chat"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
+                />
                 <div class="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>Linux DO OAuth 登录</span>
                   <HelpTip text="用于用户通过 Linux DO 账号注册/登录。需在 Linux DO Connect 中配置回调地址。默认回调：{base_url}/auth/linuxdo/callback" />
@@ -499,6 +513,12 @@ watch(settings, (value) => {
   next.basic.linuxdo_scope = typeof next.basic.linuxdo_scope === 'string'
     ? next.basic.linuxdo_scope
     : 'openid profile email'
+  next.basic.proxy_for_auth = typeof next.basic.proxy_for_auth === 'string'
+    ? next.basic.proxy_for_auth
+    : ''
+  next.basic.proxy_for_chat = typeof next.basic.proxy_for_chat === 'string'
+    ? next.basic.proxy_for_chat
+    : ''
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)

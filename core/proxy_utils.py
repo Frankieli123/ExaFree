@@ -152,9 +152,22 @@ def normalize_proxy_url(proxy_str: str) -> str:
     if not proxy_str:
         return ""
 
-    # 如果已经是标准 URL 格式，直接返回
-    if proxy_str.startswith(("http://", "https://", "socks5://", "socks5h://")):
-        return proxy_str
+    def _normalize_with_scheme(scheme: str, remainder: str) -> str:
+        remainder = (remainder or "").strip()
+        if not remainder:
+            return f"{scheme}://"
+        if "@" in remainder:
+            return f"{scheme}://{remainder}"
+        parts = remainder.split(":")
+        if len(parts) == 4:
+            host, port, user, password = parts
+            return f"{scheme}://{user}:{password}@{host}:{port}"
+        return f"{scheme}://{remainder}"
+
+    for scheme in ("http", "https", "socks5", "socks5h"):
+        prefix = f"{scheme}://"
+        if proxy_str.startswith(prefix):
+            return _normalize_with_scheme(scheme, proxy_str[len(prefix):])
 
     # 尝试解析旧格式 host:port:user:pass
     parts = proxy_str.split(":")
@@ -167,6 +180,21 @@ def normalize_proxy_url(proxy_str: str) -> str:
 
     # 无法识别的格式，尝试添加 http:// 前缀
     return f"http://{proxy_str}"
+
+
+def normalize_runtime_proxy_url(proxy_str: str) -> str:
+    """
+    规范化运行时代理 URL。
+
+    说明：
+    - 配置层允许用户输入 socks5h://，便于表达“代理端远程 DNS 解析”
+    - 但 httpx 0.27.x 与 Playwright 文档均只声明支持 socks5://
+    - 因此运行时对不兼容的 socks5h:// 做降级转换，避免客户端初始化失败
+    """
+    normalized = normalize_proxy_url(proxy_str)
+    if normalized.startswith("socks5h://"):
+        return "socks5://" + normalized[len("socks5h://"):]
+    return normalized
 
 
 def request_with_proxy_fallback(request_func: Callable, *args, **kwargs) -> Any:

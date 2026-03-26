@@ -56,7 +56,7 @@ from core.account import (
     bulk_update_account_disabled_status as _bulk_update_account_disabled_status,
     bulk_delete_accounts as _bulk_delete_accounts
 )
-from core.proxy_utils import parse_proxy_setting
+from core.proxy_utils import normalize_runtime_proxy_url, parse_proxy_setting
 from core.exa_automation import ExaAutomation
 
 # 导入 Uptime 追踪器
@@ -331,8 +331,8 @@ TIMEOUT_SECONDS = 300
 ADMIN_KEY = config.security.admin_key
 _proxy_auth, _no_proxy_auth = parse_proxy_setting(config.basic.proxy_for_auth)
 _proxy_chat, _no_proxy_chat = parse_proxy_setting(config.basic.proxy_for_chat)
-PROXY_FOR_AUTH = _proxy_auth
-PROXY_FOR_CHAT = _proxy_chat
+PROXY_FOR_AUTH = normalize_runtime_proxy_url(_proxy_auth)
+PROXY_FOR_CHAT = normalize_runtime_proxy_url(_proxy_chat)
 _NO_PROXY = ",".join(filter(None, {_no_proxy_auth, _no_proxy_chat}))
 if _NO_PROXY:
     os.environ["NO_PROXY"] = _NO_PROXY
@@ -2101,8 +2101,8 @@ async def admin_get_settings(request: Request):
     return {
         "basic": {
             "base_url": config.basic.base_url,
-            "proxy_for_auth": "",
-            "proxy_for_chat": "",
+            "proxy_for_auth": config.basic.proxy_for_auth,
+            "proxy_for_chat": config.basic.proxy_for_chat,
             "linuxdo_oauth_enabled": bool(getattr(config.basic, "linuxdo_oauth_enabled", False)),
             "linuxdo_client_id": str(getattr(config.basic, "linuxdo_client_id", "") or ""),
             "linuxdo_client_secret": str(getattr(config.basic, "linuxdo_client_secret", "") or ""),
@@ -2195,6 +2195,8 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 
     try:
         basic = dict(new_settings.get("basic") or {})
+        basic.setdefault("proxy_for_auth", config.basic.proxy_for_auth)
+        basic.setdefault("proxy_for_chat", config.basic.proxy_for_chat)
         basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
         basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
         basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)
@@ -2239,12 +2241,12 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("register_domain", config.basic.register_domain)
         basic.setdefault("image_expire_hours", -1)
         basic.pop("api_key", None)
-        basic["proxy_for_auth"] = ""
-        basic["proxy_for_chat"] = ""
         basic["refresh_window_hours"] = 0
         basic["image_expire_hours"] = -1
         if not isinstance(basic.get("register_domain"), str):
             basic["register_domain"] = ""
+        basic["proxy_for_auth"] = str(basic.get("proxy_for_auth") or "").strip()
+        basic["proxy_for_chat"] = str(basic.get("proxy_for_chat") or "").strip()
         basic["linuxdo_oauth_enabled"] = bool(basic.get("linuxdo_oauth_enabled", False))
         basic["linuxdo_client_id"] = str(basic.get("linuxdo_client_id") or "").strip()
         basic["linuxdo_client_secret"] = str(basic.get("linuxdo_client_secret") or "").strip()
@@ -2324,8 +2326,8 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         # 更新全局变量（实时生效）
         _proxy_auth, _no_proxy_auth = parse_proxy_setting(config.basic.proxy_for_auth)
         _proxy_chat, _no_proxy_chat = parse_proxy_setting(config.basic.proxy_for_chat)
-        PROXY_FOR_AUTH = _proxy_auth
-        PROXY_FOR_CHAT = _proxy_chat
+        PROXY_FOR_AUTH = normalize_runtime_proxy_url(_proxy_auth)
+        PROXY_FOR_CHAT = normalize_runtime_proxy_url(_proxy_chat)
         _NO_PROXY = ",".join(filter(None, {_no_proxy_auth, _no_proxy_chat}))
         if _NO_PROXY:
             os.environ["NO_PROXY"] = _NO_PROXY

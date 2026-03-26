@@ -83,6 +83,7 @@ class BasicConfig(BaseModel):
     gptmail_domain: str = Field(default="", description="GPTMail 邮箱域名（可选，留空则随机选择）")
     cfmail_base_url: str = Field(default="", description="Cloudflare Mail API地址")
     cfmail_api_key: str = Field(default="", description="Cloudflare Mail 访问密码（x-custom-auth）")
+    cfmail_admin_password: str = Field(default="", description="Cloudflare Mail 管理密码（x-admin-auth）")
     cfmail_verify_ssl: bool = Field(default=True, description="Cloudflare Mail SSL校验")
     cfmail_domain: str = Field(default="", description="Cloudflare Mail 邮箱域名（可选，留空随机）")
     refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
@@ -212,6 +213,7 @@ class ConfigManager:
         exa_redeem_coupon_enabled_raw = basic_data.get("exa_redeem_coupon_enabled", False)
         exa_coupon_code_raw = basic_data.get("exa_coupon_code", "")
         duckmail_api_key_raw = basic_data.get("duckmail_api_key", "")
+        cfmail_admin_password_raw = basic_data.get("cfmail_admin_password", "")
 
         # 兼容旧配置：如果存在旧的 proxy 字段，迁移到新字段
         old_proxy = basic_data.get("proxy", "")
@@ -274,6 +276,7 @@ class ConfigManager:
             gptmail_domain=str(basic_data.get("gptmail_domain") or "").strip(),
             cfmail_base_url=str(basic_data.get("cfmail_base_url") or "").strip(),
             cfmail_api_key=str(basic_data.get("cfmail_api_key") or "").strip(),
+            cfmail_admin_password=str(cfmail_admin_password_raw or "").strip(),
             cfmail_verify_ssl=_parse_bool(basic_data.get("cfmail_verify_ssl"), True),
             cfmail_domain=str(basic_data.get("cfmail_domain") or "").strip(),
             refresh_window_hours=int(refresh_window_raw),

@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from core.config import config
+from core.proxy_utils import normalize_runtime_proxy_url
 
 try:
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -58,7 +59,7 @@ class ExaAutomation:
         log_callback=None,
         headless: Optional[bool] = None,
     ) -> None:
-        self.proxy = (proxy or "").strip()
+        self.proxy = normalize_runtime_proxy_url(proxy or "")
         self.timeout_ms = timeout_ms
         self.log_callback = log_callback
         self.headless = self._resolve_headless(headless)
