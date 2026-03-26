@@ -22,7 +22,13 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from core.config import config
+from core.playwright_proxy_bridge import (
+    proxy_needs_playwright_bridge,
+    ensure_playwright_bridge,
+    build_playwright_bridge_proxy_settings,
+)
 from core.proxy_utils import (
+    normalize_proxy_url,
     normalize_runtime_proxy_url,
     sanitize_proxy_url,
     format_no_proxy,
@@ -65,9 +71,14 @@ class ExaAutomation:
         log_callback=None,
         headless: Optional[bool] = None,
     ) -> None:
-        self.proxy = normalize_runtime_proxy_url(proxy or "")
+        self.proxy_source = normalize_proxy_url(proxy or "")
+        self.proxy = normalize_runtime_proxy_url(self.proxy_source)
         self.no_proxy = str(no_proxy or "").strip()
-        self.playwright_proxy = build_playwright_proxy_settings(self.proxy, self.no_proxy)
+        self.proxy_bridge = None
+        self.playwright_proxy = build_playwright_proxy_settings(self.proxy_source, self.no_proxy)
+        if proxy_needs_playwright_bridge(self.proxy_source):
+            self.proxy_bridge = ensure_playwright_bridge(self.proxy_source)
+            self.playwright_proxy = build_playwright_bridge_proxy_settings(self.proxy_source, self.no_proxy)
         self.timeout_ms = timeout_ms
         self.log_callback = log_callback
         self.headless = self._resolve_headless(headless)
@@ -727,6 +738,7 @@ class ExaAutomation:
             "ERR_NO_SUPPORTED_PROXIES",
             "ERR_TUNNEL_CONNECTION_FAILED",
             "NS_ERROR_PROXY_CONNECTION_REFUSED",
+            "Browser does not support socks5 proxy authentication",
         )
         marker = next((item for item in known_markers if item in text), "")
         if not marker:
@@ -876,10 +888,17 @@ class ExaAutomation:
 
     def _prepare_browser_launch_env(self) -> tuple[Optional[subprocess.Popen], Optional[Dict[str, str]]]:
         self._log("info", f"🧭 Exa 浏览器模式: {self.browser_mode}")
+        if self.proxy_bridge is not None:
+            self._log(
+                "info",
+                f"🔁 检测到 SOCKS5 认证代理，已启用本地桥接: "
+                f"{sanitize_proxy_url(self.proxy_source)} -> {self.proxy_bridge.local_url}",
+            )
         auth_enabled = bool(self.playwright_proxy and (self.playwright_proxy.get("username") or self.playwright_proxy.get("password")))
         self._log(
             "info",
-            f"🔌 Exa 浏览器代理: {sanitize_proxy_url(self.proxy) or 'disabled'} "
+            f"🔌 Exa 浏览器代理: "
+            f"{(self.playwright_proxy or {}).get('server') if self.proxy_bridge is not None else (sanitize_proxy_url(self.proxy) or 'disabled')} "
             f"(auth={'yes' if auth_enabled else 'no'}, bypass={format_no_proxy(self.no_proxy)})",
         )
         if self.headless:
