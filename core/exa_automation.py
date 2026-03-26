@@ -910,7 +910,7 @@ class ExaAutomation:
         if self.proxy_bridge is not None:
             self._log(
                 "info",
-                f"🔁 检测到 SOCKS5 认证代理，已启用本地桥接: "
+                f"🔁 检测到带认证代理，已启用本地桥接: "
                 f"{sanitize_proxy_url(self.proxy_source)} -> {self.proxy_bridge.local_url}",
             )
         auth_enabled = bool(self.playwright_proxy and (self.playwright_proxy.get("username") or self.playwright_proxy.get("password")))

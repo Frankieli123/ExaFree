@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import atexit
+import base64
 import logging
 import select
 import socket
 import socketserver
+import ssl
 import threading
 from typing import Optional
 from urllib.parse import unquote, urlparse, urlsplit
@@ -122,6 +124,9 @@ class PlaywrightSocksBridge:
         self._thread = None
 
     def _open_upstream(self, host: str, port: int) -> socks.socksocket:
+        if self.scheme in ("http", "https"):
+            return self._open_http_proxy_tunnel(host, port)
+
         sock = socks.socksocket()
         sock.set_proxy(
             socks.SOCKS5,
@@ -133,6 +138,54 @@ class PlaywrightSocksBridge:
         )
         sock.settimeout(30)
         sock.connect((host, port))
+        sock.settimeout(None)
+        return sock
+
+    def _open_proxy_transport(self) -> socket.socket:
+        raw_sock = socket.create_connection((self.host, self.port), timeout=30)
+        if self.scheme == "https":
+            ctx = ssl.create_default_context()
+            wrapped = ctx.wrap_socket(raw_sock, server_hostname=self.host)
+            wrapped.settimeout(30)
+            return wrapped
+        raw_sock.settimeout(30)
+        return raw_sock
+
+    def _build_proxy_auth_header(self) -> bytes:
+        if self.username is None and self.password is None:
+            return b""
+        creds = f"{self.username or ''}:{self.password or ''}".encode("utf-8")
+        token = base64.b64encode(creds).decode("ascii")
+        return f"Proxy-Authorization: Basic {token}\r\n".encode("latin-1")
+
+    @staticmethod
+    def _recv_proxy_response_headers(sock: socket.socket) -> bytes:
+        data = bytearray()
+        while b"\r\n\r\n" not in data and len(data) < 65536:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data.extend(chunk)
+        return bytes(data)
+
+    def _open_http_proxy_tunnel(self, host: str, port: int) -> socket.socket:
+        sock = self._open_proxy_transport()
+        auth = self._build_proxy_auth_header()
+        target = f"{host}:{port}"
+        req = (
+            f"CONNECT {target} HTTP/1.1\r\n"
+            f"Host: {target}\r\n"
+            "Proxy-Connection: Keep-Alive\r\n"
+        ).encode("latin-1") + auth + b"\r\n"
+        sock.sendall(req)
+        resp = self._recv_proxy_response_headers(sock)
+        line = resp.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
+        if " 200 " not in f" {line} " and not line.startswith("HTTP/1.1 200") and not line.startswith("HTTP/1.0 200"):
+            try:
+                sock.close()
+            except Exception:
+                pass
+            raise OSError(f"http proxy CONNECT failed: {line}")
         sock.settimeout(None)
         return sock
 
@@ -177,6 +230,17 @@ class PlaywrightSocksBridge:
         header_lines: list[bytes],
         body_reader,
     ) -> None:
+        if self.scheme in ("http", "https"):
+            self._handle_http_via_http_proxy(
+                client_sock=client_sock,
+                method=method,
+                target=target,
+                version=version,
+                header_lines=header_lines,
+                body_reader=body_reader,
+            )
+            return
+
         parsed = urlsplit(target)
         host = parsed.hostname or ""
         port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
@@ -232,13 +296,83 @@ class PlaywrightSocksBridge:
             except Exception:
                 pass
 
+    def _handle_http_via_http_proxy(
+        self,
+        *,
+        client_sock: socket.socket,
+        method: str,
+        target: str,
+        version: str,
+        header_lines: list[bytes],
+        body_reader,
+    ) -> None:
+        upstream_sock = self._open_proxy_transport()
+        try:
+            outgoing = [f"{method} {target} {version}\r\n".encode("latin-1")]
+            content_length = 0
+            has_host = False
+            has_proxy_auth = False
+            for raw in header_lines:
+                line = raw.decode("latin-1")
+                name, _, value = line.partition(":")
+                lowered = name.strip().lower()
+                if lowered == "proxy-connection":
+                    continue
+                if lowered == "proxy-authorization":
+                    has_proxy_auth = True
+                    continue
+                if lowered == "host":
+                    has_host = True
+                if lowered == "content-length":
+                    try:
+                        content_length = int(value.strip())
+                    except Exception:
+                        content_length = 0
+                if lowered == "connection":
+                    raw = b"Connection: close\r\n"
+                outgoing.append(raw)
+
+            if not has_host:
+                parsed = urlsplit(target)
+                host = parsed.hostname or ""
+                port = parsed.port
+                host_header = f"{host}:{port}" if port else host
+                outgoing.append(f"Host: {host_header}\r\n".encode("latin-1"))
+
+            if not has_proxy_auth:
+                auth = self._build_proxy_auth_header()
+                if auth:
+                    outgoing.append(auth)
+
+            outgoing.append(b"Connection: close\r\n\r\n")
+            upstream_sock.sendall(b"".join(outgoing))
+            if content_length > 0:
+                body = body_reader.read(content_length)
+                if body:
+                    upstream_sock.sendall(body)
+
+            while True:
+                chunk = upstream_sock.recv(65536)
+                if not chunk:
+                    break
+                client_sock.sendall(chunk)
+        finally:
+            try:
+                upstream_sock.close()
+            except Exception:
+                pass
+            try:
+                client_sock.close()
+            except Exception:
+                pass
+
 
 def proxy_needs_playwright_bridge(proxy_url: str) -> bool:
     normalized = normalize_proxy_url(proxy_url)
     if not normalized:
         return False
     parsed = urlparse(normalized)
-    return (parsed.scheme or "").lower() in ("socks5", "socks5h") and (
+    return (parsed.scheme or "").lower() in ("http", "https", "socks5", "socks5h") and (
         parsed.username is not None or parsed.password is not None
     )
 
